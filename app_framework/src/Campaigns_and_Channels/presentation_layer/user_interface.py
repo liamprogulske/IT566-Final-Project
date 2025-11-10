@@ -5,20 +5,30 @@ from application_name.service_layer.app_services import AppServices
 import inspect
 import json
 
-class UserInterface(ApplicationBase):
-    """UserInterface Class Definition."""
-    def __init__(self, config:dict)->None:
-        """Initializes object. """
-        self._config_dict = config
-        self.META = config["meta"]
-        super().__init__(subclass_name=self.__class__.__name__, 
-				   logfile_prefix_name=self.META["log_prefix"])
-        self.DB = AppServices(config)
-        self._logger.log_debug(f'{inspect.currentframe().f_code.co_name}:It works!')
+from application_name.business_layer import campaign_service as svc
 
-
-
+class UserInterface:
+    def __init__(self, config):
+        self.config = config
+        self.running = True
 
     def start(self):
-        """Start main user interface."""
-        self._logger.log_debug(f'{inspect.currentframe().f_code.co_name}: User interface started!')
+        print("=== Campaigns & Channels Console ===")
+        print(f"Config loaded for DB: {self.config['database']['connection']['config']['database']}")
+        while self.running:
+            self.show_menu()
+
+    def show_menu(self):
+        print("\n1) List Campaigns\n2) List Channels\n3) Exit")
+        choice = input("Select option: ").strip()
+        if choice == "1":
+            for c in svc.list_campaigns():
+                print(f"[{c.campaign_id}] {c.name} | {c.status}")
+        elif choice == "2":
+            for ch in svc.list_channels():
+                print(f"[{ch.channel_id}] {ch.name} ({ch.type})")
+        elif choice == "3":
+            self.running = False
+            print("Goodbye!")
+        else:
+            print("Invalid choice.")
