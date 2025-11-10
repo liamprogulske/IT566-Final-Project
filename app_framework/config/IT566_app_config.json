@@ -6,17 +6,17 @@
 	},
 	"database":{
 		"pool":{
-			"name": "campaigns_and_channels_db_bool",
+			"name": "campaigns_db_bool",
 			"size": 10,
 			"reset_session": true,
 			"use_pure": true
 		},
 		"connection":{
 			"config":{
-				"database": "campaigns_and_channels_db",
-				"user": "database_username",
+				"database": "campaigns_db",
+				"user": "root",
 				"host": "localhost",
-				"port": 8889
+				"port": 3306
 			}
 		}
 	}
