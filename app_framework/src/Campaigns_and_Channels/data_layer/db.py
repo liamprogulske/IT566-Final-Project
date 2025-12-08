@@ -2,13 +2,15 @@ import mysql.connector
 from mysql.connector.pooling import MySQLConnectionPool
 from mysql.connector import Error
 
+
 class DB:
     _pool = None
 
     @classmethod
     def init_pool(cls, cfg):
 
-        if cls._pool: return
+        if cls._pool:
+            return
         cls._pool = MySQLConnectionPool(
             pool_name=cfg['database']['pool']['name'],
             pool_size=cfg['database']['pool']['size'],
@@ -37,11 +39,14 @@ class DB:
         Always close() it when done so it returns to the pool.
         """
         if cls._pool is None:
-            raise RuntimeError("DB pool is not initialized. Call DB.init_pool(config) first.")
+            raise RuntimeError(
+                "DB pool is not initialized. Call DB.init_pool(config) first.")
         return cls._pool.get_connection()
+
 
 def row_to_dict(cursor, row):
     return {desc[0]: value for desc, value in zip(cursor.description, row)}
+
 
 def get_connection():
     return mysql.connector.connect(

@@ -85,20 +85,20 @@ class CampaignDAO:
             conn.close()
         
 
-def set_status(self, campaign_id: int, status: str) -> bool:
-    """
-    Update the status of a campaign.
-    Returns True if updated, False if no campaign was found.
-    """
-    conn = DB.get_connection()
-    try:
-        cur = conn.cursor()
-        cur.execute(
-            "UPDATE campaign SET status = %s WHERE campaign_id = %s",
-            (status, campaign_id),
-        )
-        conn.commit()
-        return cur.rowcount > 0
-    finally:
-        cur.close()
-        conn.close()
+    def set_status(self, campaign_id: int, status: str) -> bool:
+        """
+        Update the status of a campaign.
+        Returns True if updated, False if no campaign was found.
+        """
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "UPDATE campaign SET status = %s WHERE campaign_id = %s",
+                (status, campaign_id),
+            )
+            conn.commit()
+            return cur.rowcount > 0
+        finally:
+            cur.close()
+            conn.close()

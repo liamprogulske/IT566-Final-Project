@@ -12,7 +12,6 @@ class ChannelDAO:
       channel (
           channel_id INT AUTO_INCREMENT PRIMARY KEY,
           name VARCHAR(100) NOT NULL,
-          description TEXT NULL,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       )
     """
@@ -20,17 +19,17 @@ class ChannelDAO:
     # ------------------------------------------------------------------
     # CREATE
     # ------------------------------------------------------------------
-    def create(self, name: str, description: Optional[str] = None) -> int:
+    def create(self, name: str, ch_type) -> int:
         """
         Insert a new channel record and return its ID.
         """
         sql = """
-            INSERT INTO channel (name, description)
+            INSERT INTO channel (name, type)
             VALUES (%s, %s)
         """
         with DB.conn() as cn, cn.cursor() as cur:
             try:
-                cur.execute(sql, (name, description))
+                cur.execute(sql, (name, ch_type))
                 cn.commit()
                 return cur.lastrowid
             except mysql_errors.IntegrityError as e:

@@ -68,17 +68,57 @@ class UserInterface:
                     print(f"no campaign found with id={cid}")
                 return
 
+            # NEW: get a single campaign by id
+            if cmd == "campaign:get":
+                if len(args) < 2:
+                    print("Usage: campaign:get <campaign_id>")
+                    return
+                cid = int(args[1])
+                self.campaign_get(cid)
+                return
+
+            # NEW: update a campaign
+            # Usage: campaign:update <id> <name> [start_date] [end_date] [budget_cents]
+            if cmd == "campaign:update":
+                if len(args) < 3:
+                    print(
+                        "Usage: campaign:update <campaign_id> <name> "
+                        "[start_date] [end_date] [budget_cents]"
+                    )
+                    return
+                cid = int(args[1])
+                name = args[2]
+                sd = args[3] if len(args) > 3 else None
+                ed = args[4] if len(args) > 4 else None
+                budget = int(args[5]) if len(args) > 5 else None
+                self.campaign_update(cid, name, sd, ed, budget)
+                return
+
+            # NEW: set status of campaign
+            # Usage: campaign:set-status <campaign_id> <status>
+            if cmd == "campaign:set-status":
+                if len(args) < 3:
+                    print("Usage: campaign:set-status <campaign_id> <status>")
+                    return
+                cid = int(args[1])
+                status = args[2]
+                self.campaign_set_status(cid, status)
+                return
             if cmd == "channel:list":
                 # pretty formatted channel list
                 self.channel_list()
                 return
 
             if cmd == "channel:add":
-                # channel:add "TikTok"
+                # Usage: channel:add <name> [type]
+                if len(args) < 2:
+                    print("Usage: channel:add <name> [type]")
+                    return
+
                 name = args[1]
-                from ..data_layer.channel_dao import ChannelDAO
-                ch = ChannelDAO()
-                ch_id = ch.create(name)
+                ch_type = args[2] if len(args) > 2 else "Other"
+                ch = self.channels
+                ch_id = ch.create(name, ch_type)
                 print(f"created channel_id={ch_id}")
                 return
 
@@ -90,6 +130,16 @@ class UserInterface:
                 chid = int(args[1])
                 force = ("--force" in args[2:])
                 self.channel_delete(chid, force=force)
+                return
+            
+            if cmd == "channel:update":
+                if len(args) < 4:
+                    print("Usage: channel:update <channel_id> <name> <type>")
+                    return
+                chid = int(args[1])
+                name = args[2]
+                ch_type = args[3]
+                self.channel_update(chid, name, ch_type)
                 return
 
             if cmd == "link":
@@ -126,10 +176,14 @@ class UserInterface:
         campaign:list                                         - list campaigns      
         campaign:add <name> [start] [end] [budget_cents]      - create a campaign   
         campaign:delete <campaign_id>                         - delete a campaign
+        campaign:get <campaign_id>                            - show a campaign by id
+        campaign:update <id> <name> [start] [end] [budget]    - update a campaign
+        campaign:set-status <id> <status>                     - set status of a campaign
               
         channel:list                                          - list channels (formatted)
         channel:add <name>                                    - create a channel
         channel:delete <channel_id> [--force]                 - delete a channel
+        channel:update <id> <name> <type>                     - update a channel
               
         link <campaign_id> <channel_id>                       - link campaign to channel
         unlink <campaign_id> <channel_id>                     - unlink campaign to channel
@@ -205,6 +259,61 @@ class UserInterface:
         else:
             print(f"no campaign found with id={campaign_id}")
 
+    def campaign_get(self, campaign_id: int):
+        """Fetch and pretty-print a single campaign by id."""
+        campaign = self.campaigns.get(campaign_id)
+        if not campaign:
+            print(f"no campaign found with id={campaign_id}")
+            return
+
+        print("\n------------ CAMPAIGN DETAIL ------------\n")
+        print(f"ID:       {campaign.get('campaign_id')}")
+        print(f"Name:     {campaign.get('name')}")
+        print(f"Status:   {campaign.get('status')}")
+        print(f"Start:    {campaign.get('start_date')}")
+        print(f"End:      {campaign.get('end_date')}")
+        print(f"Budget:   {campaign.get('budget_cents')} cents")
+        print(f"Created:  {campaign.get('created_at')}")
+        print("\n----------------------------------------\n")
+
+    def campaign_update(self, campaign_id: int, name: str,
+                        start_date: str | None,
+                        end_date: str | None,
+                        budget_cents: int | None):
+        """
+        Update fields on a campaign.
+        Only non-None fields will be updated.
+        """
+        fields = {}
+        if name:
+            fields["name"] = name
+        if start_date is not None:
+            fields["start_date"] = start_date
+        if end_date is not None:
+            fields["end_date"] = end_date
+        if budget_cents is not None:
+            fields["budget_cents"] = budget_cents
+
+        if not fields:
+            print("No fields to update.")
+            return
+
+        updated = self.campaigns.update(campaign_id, **fields)
+        if not updated:
+            print(f"no campaign found with id={campaign_id}")
+        else:
+            print(f"updated campaign_id={campaign_id}")
+
+    def campaign_set_status(self, campaign_id: int, status: str):
+        """
+        Set the status of a campaign using the existing DAO logic.
+        Example statuses might be: 'planned', 'active', 'completed'.
+        """
+        ok = self.campaigns.set_status(campaign_id, status)
+        if not ok:
+            print(f"no campaign found with id={campaign_id}")
+        else:
+            print(f"status for campaign_id={campaign_id} set to '{status}'")
 
 #----------------------------------------------------------#
 #------------------------CHANNEL---------------------------#
@@ -277,6 +386,29 @@ class UserInterface:
         else:
             print(f"no channel found with id={channel_id}")
 
+
+#----------------------------------------------------------#
+#------------------------UPDATE----------------------------#
+#----------------------------------------------------------#
+    def channel_update(self, channel_id: int, name: str, ch_type: str):
+        """
+        Update a channel's name and/or type.
+        """
+        fields = {}
+        if name:
+            fields["name"] = name
+        if ch_type:
+            fields["type"] = ch_type
+
+        if not fields:
+            print("No fields to update.")
+            return
+
+        updated = self.channels.update(channel_id, **fields)
+        if not updated:
+            print(f"no channel found with id={channel_id}")
+        else:
+            print(f"updated channel_id={channel_id}")
 
 #----------------------------------------------------------#
 #------------------------UNLINK----------------------------#
