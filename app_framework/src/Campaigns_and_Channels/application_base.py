@@ -1,8 +1,8 @@
 """Implements behavior common to all application classes.."""
 
 from abc import ABC, abstractmethod
-from application_name.logging import LoggingService
-from application_name.settings import Settings
+from .logging import LoggingService
+from .settings import Settings
 
 class ApplicationBase(ABC):
     """Implements ApplicationBase class."""

@@ -2,7 +2,7 @@
 -- 02_seed.sql (MySQL)
 INSERT IGNORE INTO channel(name, type) VALUES
   ('Google Ads', 'search'),
-  ('Meta Ads', 'social'),
+  ('Youtube Ads', 'social'),
   ('Programmatic Display', 'display'),
   ('Email Platform', 'email');
 

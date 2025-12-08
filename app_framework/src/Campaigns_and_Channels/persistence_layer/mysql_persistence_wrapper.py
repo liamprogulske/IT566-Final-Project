@@ -1,6 +1,6 @@
 """Defines the MySQLPersistenceWrapper class."""
 
-from application_name.application_base import ApplicationBase
+from ..application_base import ApplicationBase
 from mysql import connector
 from mysql.connector.pooling import (MySQLConnectionPool)
 import inspect
@@ -29,8 +29,8 @@ class MySQLPersistenceWrapper(ApplicationBase):
 		self._logger.log_debug(f'{inspect.currentframe().f_code.co_name}: DB Connection Config Dict: {self.DB_CONFIG}')
 
 		# Database Connection
-		#self._connection_pool = \
-			#self._initialize_database_connection_pool(self.DB_CONFIG)
+		self._connection_pool = \
+			self._initialize_database_connection_pool(self.DB_CONFIG)
 		
 
 		# SQL String Constants

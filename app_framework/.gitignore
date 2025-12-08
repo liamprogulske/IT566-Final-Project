@@ -1,0 +1,25 @@
+# OS files
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+
+# XAMPP / local DB stuff
+*.sql
+*.pid
+*.sock
+*.err
+*.db
+
+# Configs with credentials
+config/*.json
+
+# VSCode settings
+.vscode/

@@ -1,23 +1,15 @@
 {
-	"meta":{
-		"version": "v1",
-		"app_name": "Campaigns and Channels",
-		"log_prefix": "Campaigns_and_Channels"
-	},
-	"database":{
-		"pool":{
-			"name": "campaigns_db_bool",
-			"size": 10,
-			"reset_session": true,
-			"use_pure": true
-		},
-		"connection":{
-			"config":{
-				"database": "campaigns_db",
-				"user": "root",
-				"host": "localhost",
-				"port": 3306
-			}
-		}
-	}
+  "meta": { "version":"v1", "app_name":"Campaigns and Channels", "log_prefix":"Campaigns_And_Channels" },
+  "database": {
+    "pool": { "name": "it566_project", "size": 10, "reset_session": true, "use_pure": true },
+    "connection": {
+      "config": {
+        "database": "it566_project_db",
+        "user": "root",
+        "host": "localhost",
+        "port": 3306,
+        "password": "root"
+      }
+    }
+  }
 }
