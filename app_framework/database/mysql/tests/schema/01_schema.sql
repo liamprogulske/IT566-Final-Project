@@ -37,4 +37,19 @@ CREATE TABLE IF NOT EXISTS campaign_channel_xref (
     REFERENCES channel(channel_id) ON DELETE CASCADE
 ) ENGINE=InnoDB;
 
+-- Daily metrics aggregated per campaign
+CREATE TABLE campaign_daily_metrics (
+  campaign_id     INT UNSIGNED NOT NULL,
+  metric_date     DATE NOT NULL,
+  impressions     INT UNSIGNED DEFAULT 0,
+  clicks          INT UNSIGNED DEFAULT 0,
+  spend_cents BIGINT UNSIGNED DEFAULT 0,
+  revenue_cents BIGINT UNSIGNED DEFAULT 0,
+  PRIMARY KEY (campaign_id, metric_date),
+  CONSTRAINT fk_campaign_daily_metrics_campaign
+    FOREIGN KEY (campaign_id)
+    REFERENCES campaign(campaign_id)
+    ON DELETE CASCADE
+);
+
 SET FOREIGN_KEY_CHECKS=1;

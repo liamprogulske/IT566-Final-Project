@@ -1,69 +1,47 @@
+# app_framework/src/Campaigns_and_Channels/data_layer/db.py
+
 import mysql.connector
 from mysql.connector.pooling import MySQLConnectionPool
 from mysql.connector import Error
 
 
 class DB:
-    _pool = None
+    _pool: MySQLConnectionPool | None = None
 
     @classmethod
-    def init_pool(cls, cfg):
+    def init_pool(cls, cfg: dict) -> None:
+        """
+        Initialize the connection pool once from JSON config dict.
 
-        if cls._pool:
+        Expected shape:
+        cfg["database"]["pool"]["name"]
+        cfg["database"]["pool"]["size"]
+        cfg["database"]["connection"]["config"]  -> dict(host, port, user, password, database)
+        """
+        if cls._pool is not None:
             return
+
         cls._pool = MySQLConnectionPool(
-            pool_name=cfg['database']['pool']['name'],
-            pool_size=cfg['database']['pool']['size'],
-            **cfg['database']['connection']['config']
+            pool_name=cfg["database"]["pool"]["name"],
+            pool_size=cfg["database"]["pool"]["size"],
+            **cfg["database"]["connection"]["config"],
         )
 
     @classmethod
-    def conn(cls):
-        if not cls._pool:
+    def get_connection(cls) -> mysql.connector.connection.MySQLConnection:
+        """Get a pooled MySQL connection. Call .close() when done."""
+        if cls._pool is None:
             raise RuntimeError("DB pool not initialized")
-        return cls._pool.get_connection()
-
-    def row_to_dict(cursor, row):
-        return {desc[0]: value for desc, value in zip(cursor.description, row)}
-        if cls._pool is None:
-            cls._pool = MySQLConnectionPool(
-                pool_name=cfg["database"]["pool"]["name"],
-                pool_size=cfg["database"]["pool"]["size"],
-                **cfg["database"]["connection"]["config"],
-            )
-
-    @classmethod
-    def get_connection(cls):
-        """
-        Get a pooled MySQL connection.
-        Always close() it when done so it returns to the pool.
-        """
-        if cls._pool is None:
-            raise RuntimeError(
-                "DB pool is not initialized. Call DB.init_pool(config) first.")
         return cls._pool.get_connection()
 
 
 def row_to_dict(cursor, row):
+    """Convert a row + cursor.description to a dict."""
+    if row is None:
+        return None
     return {desc[0]: value for desc, value in zip(cursor.description, row)}
 
-
-def get_connection():
-    return mysql.connector.connect(
-        host="127.0.0.1",
-        port=3306,
-        user="root",
-        password="root",
-        database="it566_project_db",
-    )
-
-
-def upsert_campaign_daily_metrics(campaign_id, metric_date, impressions, clicks, cost_cents):
-    """
-    Upsert daily metrics for a campaign.
-
-    metric_date: 'YYYY-MM-DD' string or date object
-    """
+""" def upsert_campaign_daily_metrics(campaign_id, metric_date, impressions, clicks, cost_cents):
     conn = get_connection()
     try:
         cursor = conn.cursor()
@@ -78,9 +56,7 @@ def upsert_campaign_daily_metrics(campaign_id, metric_date, impressions, clicks,
 
 
 def get_campaign_performance(campaign_id=None):
-    """
-    Returns aggregated performance for all campaigns or a single one.
-    """
+    
     conn = get_connection()
     try:
         cursor = conn.cursor(dictionary=True)
@@ -95,3 +71,4 @@ def get_campaign_performance(campaign_id=None):
     finally:
         cursor.close()
         conn.close()
+ """

@@ -1,147 +1,202 @@
-# Campaigns_And_Channels/data_layer/campaign_channel_xref_dao.py
-from typing import List, Dict, Optional, Tuple
-from mysql.connector import errors as mysql_errors
+from __future__ import annotations
+
+from datetime import date
+from typing import List, Dict, Optional
 
 from .db import DB, row_to_dict
 
 
 class CampaignChannelXrefDAO:
     """
-    Data access for the campaign_channel_xref table.
-
-    Expected schema (typical):
-      campaign_channel_xref(
-          campaign_id INT NOT NULL,
-          channel_id  INT NOT NULL,
-          PRIMARY KEY (campaign_id, channel_id),
-          FOREIGN KEY (campaign_id) REFERENCES campaign(campaign_id) ON DELETE CASCADE,
-          FOREIGN KEY (channel_id)  REFERENCES channel(channel_id)  ON DELETE CASCADE
-      )
+    Data Access Object that manages:
+      - The many-to-many mapping table: campaign_channel_xref
+      - Optional campaign_daily_metrics table for performance aggregation.
     """
-
-    # -------------------------
-    # Write operations
-    # -------------------------
+    # ---------------------------------------------------------- #
+    # LINK / UNLINK
+    # ---------------------------------------------------------- #
     def link(self, campaign_id: int, channel_id: int) -> bool:
         """
-        Link a campaign to a channel.
-        Returns True if inserted, False if it already existed.
+        Insert a mapping if it does not exist.
+        Returns True if newly added, False if already existed.
         """
-        sql = """
-            INSERT IGNORE INTO campaign_channel_xref (campaign_id, channel_id)
+        sql_check = """
+            SELECT 1 FROM campaign_channel_xref
+            WHERE campaign_id = %s AND channel_id = %s
+        """
+        sql_insert = """
+            INSERT INTO campaign_channel_xref (campaign_id, channel_id)
             VALUES (%s, %s)
         """
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (campaign_id, channel_id))
-            cn.commit()
-            return cur.rowcount == 1  # 1 = inserted; 0 = already existed
+
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql_check, (campaign_id, channel_id))
+            if cur.fetchone():
+                return False  # already linked
+
+            cur.execute(sql_insert, (campaign_id, channel_id))
+            conn.commit()
+            return True
+        finally:
+            cur.close()
+            conn.close()
 
     def unlink(self, campaign_id: int, channel_id: int) -> int:
         """
-        Unlink a campaign from a channel.
-        Returns the number of rows deleted (0 or 1).
+        Remove a single campaign ↔ channel mapping.
+        Returns number of rows deleted (0 or 1).
         """
         sql = """
             DELETE FROM campaign_channel_xref
             WHERE campaign_id = %s AND channel_id = %s
         """
-        with DB.conn() as cn, cn.cursor() as cur:
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
             cur.execute(sql, (campaign_id, channel_id))
-            cn.commit()
+            conn.commit()
             return cur.rowcount
+        finally:
+            cur.close()
+            conn.close()
 
-    def purge_campaign(self, campaign_id: int) -> int:
-        """Delete all links for a given campaign. Returns rows deleted."""
-        sql = "DELETE FROM campaign_channel_xref WHERE campaign_id = %s"
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (campaign_id,))
-            cn.commit()
-            return cur.rowcount
-
-    def purge_channel(self, channel_id: int) -> int:
-        """Delete all links for a given channel. Returns rows deleted."""
-        sql = "DELETE FROM campaign_channel_xref WHERE channel_id = %s"
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (channel_id,))
-            cn.commit()
-            return cur.rowcount
-
-    # -------------------------
-    # Read operations
-    # -------------------------
-    def exists(self, campaign_id: int, channel_id: int) -> bool:
-        """Return True if a link exists."""
-        sql = """
-            SELECT 1 FROM campaign_channel_xref
-            WHERE campaign_id = %s AND channel_id = %s
-            LIMIT 1
-        """
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (campaign_id, channel_id))
-            return cur.fetchone() is not None
-
+    # ---------------------------------------------------------- #
+    # LIST: Channels for Campaign
+    # ---------------------------------------------------------- #
     def list_channels_for_campaign(self, campaign_id: int) -> List[Dict]:
         """
-        Return channel rows linked to a campaign.
+        Return a list of channel rows linked to a campaign.
         """
         sql = """
             SELECT ch.*
-            FROM campaign_channel_xref x
-            JOIN channel ch ON ch.channel_id = x.channel_id
-            WHERE x.campaign_id = %s
-            ORDER BY ch.name
+            FROM channel ch
+            JOIN campaign_channel_xref ccx
+              ON ccx.channel_id = ch.channel_id
+            WHERE ccx.campaign_id = %s
+            ORDER BY ch.channel_id
         """
-        with DB.conn() as cn, cn.cursor() as cur:
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
             cur.execute(sql, (campaign_id,))
-            return [row_to_dict(cur, r) for r in cur.fetchall()]
+            rows = cur.fetchall()
+            return [row_to_dict(cur, r) for r in rows]
+        finally:
+            cur.close()
+            conn.close()
 
-    def list_campaigns_for_channel(self, channel_id: int) -> List[Dict]:
+    # ---------------------------------------------------------- #
+    # UPSERT DAILY METRICS
+    # ---------------------------------------------------------- #
+    def upsert_campaign_daily_metrics(
+        self,
+        campaign_id: int,
+        metric_date: date,
+        impressions: int = 0,
+        clicks: int = 0,
+        spend_cents: int = 0,
+        revenue_cents: int = 0,
+    ) -> None:
         """
-        Return campaign rows linked to a channel.
+        Insert or update a row in campaign_daily_metrics.
+
+        Uses composite PK (campaign_id, metric_date) and
+        ON DUPLICATE KEY UPDATE to perform the upsert.
         """
         sql = """
-            SELECT c.*
-            FROM campaign_channel_xref x
-            JOIN campaign c ON c.campaign_id = x.campaign_id
-            WHERE x.channel_id = %s
-            ORDER BY c.created_at DESC, c.campaign_id DESC
+            INSERT INTO campaign_daily_metrics (
+                campaign_id, metric_date, impressions, clicks, spend_cents, revenue_cents
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON DUPLICATE KEY UPDATE
+              impressions = VALUES(impressions),
+              clicks      = VALUES(clicks),
+              spend_cents = VALUES(spend_cents),
+              revenue_cents = VALUES(revenue_cents)
         """
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (channel_id,))
-            return [row_to_dict(cur, r) for r in cur.fetchall()]
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                sql,
+                (campaign_id, metric_date, impressions, clicks, spend_cents, revenue_cents),
+            )
+            conn.commit()
+        finally:
+            cur.close()
+            conn.close()
 
-    def list_links(self, limit: int = 100, offset: int = 0) -> List[Dict]:
+    # ---------------------------------------------------------- #
+    # CAMPAIGN PERFORMANCE (AGGREGATED)
+    # ---------------------------------------------------------- #
+    def get_campaign_performance(
+        self,
+        campaign_id: int,
+        start_date: Optional[date] = None,
+        end_date: Optional[date] = None,
+    ) -> Dict:
         """
-        List raw pairs (campaign_id, channel_id). Useful for debugging.
-        """
-        sql = """
-            SELECT campaign_id, channel_id
-            FROM campaign_channel_xref
-            ORDER BY campaign_id, channel_id
-            LIMIT %s OFFSET %s
-        """
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (limit, offset))
-            return [row_to_dict(cur, r) for r in cur.fetchall()]
+        Aggregate performance metrics for a campaign over an optional date range.
 
-    def counts(self) -> Dict[str, int]:
+        Returns a dict with:
+          - impressions, clicks, spend_cents, revenue_cents
+          - ctr (click-through rate)
+          - cpc (cost per click)
+          - roas (revenue / spend, if revenue is provided)
         """
-        Return counts for dashboard-ish display.
-        {
-          "links": <total links>,
-          "campaigns_with_channels": <distinct campaigns linked>,
-          "channels_with_campaigns": <distinct channels linked>
-        }
+        base_sql = """
+            SELECT
+                COALESCE(SUM(impressions), 0)   AS impressions,
+                COALESCE(SUM(clicks), 0)        AS clicks,
+                COALESCE(SUM(spend_cents), 0)   AS spend_cents,
+                COALESCE(SUM(revenue_cents), 0) AS revenue_cents
+            FROM campaign_daily_metrics
+            WHERE campaign_id = %s
         """
-        sql_total = "SELECT COUNT(*) FROM campaign_channel_xref"
-        sql_c = "SELECT COUNT(DISTINCT campaign_id) FROM campaign_channel_xref"
-        sql_h = "SELECT COUNT(DISTINCT channel_id)  FROM campaign_channel_xref"
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql_total); links = cur.fetchone()[0]
-            cur.execute(sql_c); campaigns_distinct = cur.fetchone()[0]
-            cur.execute(sql_h); channels_distinct = cur.fetchone()[0]
+
+        params: list = [campaign_id]
+
+        if start_date is not None:
+            base_sql += " AND metric_date >= %s"
+            params.append(start_date)
+        if end_date is not None:
+            base_sql += " AND metric_date <= %s"
+            params.append(end_date)
+
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(base_sql, tuple(params))
+            row = cur.fetchone()
+        finally:
+            cur.close()
+            conn.close()
+
+        if row is None:
+            impressions = clicks = spend_cents = revenue_cents = 0
+        else:
+            # Convert Decimal/MySQL values to python ints
+            impressions = int(row[0] or 0)
+            clicks = int(row[1] or 0)
+            spend_cents = int(row[2] or 0)
+            revenue_cents = int(row[3] or 0)
+
+        # Safe computed metrics
+        ctr = (clicks / impressions) if impressions > 0 else 0.0
+        cpc = (spend_cents / clicks) / 100.0 if clicks > 0 else 0.0  # USD/click
+        roas = (revenue_cents / spend_cents) if spend_cents > 0 else 0.0
+
         return {
-            "links": links,
-            "campaigns_with_channels": campaigns_distinct,
-            "channels_with_campaigns": channels_distinct,
+            "campaign_id": campaign_id,
+            "impressions": impressions,
+            "clicks": clicks,
+            "spend_cents": spend_cents,
+            "revenue_cents": revenue_cents,
+            "ctr": ctr,
+            "cpc": cpc,
+            "roas": roas,
+            "start_date": start_date,
+            "end_date": end_date,
         }

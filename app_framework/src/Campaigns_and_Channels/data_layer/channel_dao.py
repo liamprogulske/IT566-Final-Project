@@ -1,106 +1,131 @@
-# /data_layer/channel_dao.py
-from typing import List, Dict, Optional
-from mysql.connector import errors as mysql_errors
+from __future__ import annotations
+
+from typing import Optional, List, Dict
+
 from .db import DB, row_to_dict
 
 
 class ChannelDAO:
     """
-    Data Access Object for the `channel` table.
+    Data Access Object for the 'channel' table.
 
-    Expected table schema (from your SQL setup):
-      channel (
-          channel_id INT AUTO_INCREMENT PRIMARY KEY,
-          name VARCHAR(100) NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-      )
+    Schema (as used in UI):
+      channel_id INT PK AUTO_INCREMENT
+      name       VARCHAR(...)
+      type       VARCHAR(...)   -- sometimes called 'platform' in UI text
+      created_at TIMESTAMP
     """
 
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------- #
+    # READ
+    # -------------------------------------------------------------- #
+    def get(self, channel_id: int) -> Optional[Dict]:
+        sql = "SELECT * FROM channel WHERE channel_id = %s"
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, (channel_id,))
+            row = cur.fetchone()
+            return row_to_dict(cur, row)
+        finally:
+            cur.close()
+            conn.close()
+
+    def list(
+        self,
+        limit: int = 100,
+        offset: int = 0,
+        q: Optional[str] = None,
+    ) -> List[Dict]:
+        base = "SELECT * FROM channel"
+        params: list = []
+
+        if q:
+            base += " WHERE name LIKE %s"
+            params.append(f"%{q}%")
+
+        base += " ORDER BY channel_id LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(base, tuple(params))
+            rows = cur.fetchall()
+            return [row_to_dict(cur, r) for r in rows]
+        finally:
+            cur.close()
+            conn.close()
+
+    # -------------------------------------------------------------- #
     # CREATE
-    # ------------------------------------------------------------------
-    def create(self, name: str, ch_type) -> int:
+    # -------------------------------------------------------------- #
+    def create(self, name: str, ch_type: str = "Other") -> int:
         """
-        Insert a new channel record and return its ID.
+        Create a channel.
+
+        Only 'name' and 'type' are stored because the schema defines:
+          channel_id, name, type, created_at
         """
         sql = """
             INSERT INTO channel (name, type)
             VALUES (%s, %s)
         """
-        with DB.conn() as cn, cn.cursor() as cur:
-            try:
-                cur.execute(sql, (name, ch_type))
-                cn.commit()
-                return cur.lastrowid
-            except mysql_errors.IntegrityError as e:
-                raise ValueError(f"Channel with name '{name}' already exists.") from e
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            # IMPORTANT: parameters must be a tuple, not a bare string
+            cur.execute(sql, (name, ch_type))
+            conn.commit()
+            return cur.lastrowid
+        finally:
+            cur.close()
+            conn.close()
 
-    # ------------------------------------------------------------------
-    # READ
-    # ------------------------------------------------------------------
-    def get(self, channel_id: int) -> Optional[Dict]:
-        """
-        Fetch one channel by ID.
-        """
-        sql = "SELECT * FROM channel WHERE channel_id = %s"
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (channel_id,))
-            row = cur.fetchone()
-            return row_to_dict(cur, row) if row else None
-
-    def list(self, limit: int = 100, offset: int = 0, q: Optional[str] = None) -> List[Dict]:
-        """
-        Return all channels (optionally filtered by search term).
-        """
-        sql = "SELECT * FROM channel"
-        args = []
-        if q:
-            sql += " WHERE name LIKE %s"
-            args.append(f"%{q}%")
-        sql += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
-        args += [limit, offset]
-
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, tuple(args))
-            return [row_to_dict(cur, r) for r in cur.fetchall()]
-
-    def get_by_name(self, name: str) -> Optional[Dict]:
-        """
-        Get a channel by its name.
-        """
-        sql = "SELECT * FROM channel WHERE name = %s LIMIT 1"
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (name,))
-            row = cur.fetchone()
-            return row_to_dict(cur, row) if row else None
-
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------- #
     # UPDATE
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------- #
     def update(self, channel_id: int, **fields) -> int:
         """
-        Update one or more fields on a channel. Returns the number of affected rows.
+        Update arbitrary fields on a channel.
+
+        Example usage:
+          update(1, name="Email (Updated)", type="Email")
         """
-        if not fields:
+        keys = list(fields.keys())
+        if not keys:
             return 0
-        cols = ", ".join(f"{k} = %s" for k in fields)
-        sql = f"UPDATE channel SET {cols} WHERE channel_id = %s"
-        vals = list(fields.values()) + [channel_id]
 
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, vals)
-            cn.commit()
+        set_clause = ", ".join(f"{k} = %s" for k in keys)
+        sql = f"UPDATE channel SET {set_clause} WHERE channel_id = %s"
+        params = [fields[k] for k in keys] + [channel_id]
+
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, params)
+            conn.commit()
             return cur.rowcount
+        finally:
+            cur.close()
+            conn.close()
 
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------- #
     # DELETE
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------- #
     def delete(self, channel_id: int) -> int:
         """
-        Delete a channel by ID. Returns number of rows deleted.
+        Delete a channel by ID.
+        Because of ON DELETE CASCADE on campaign_channel_xref (if configured),
+        this will also remove its mappings.
         """
         sql = "DELETE FROM channel WHERE channel_id = %s"
-        with DB.conn() as cn, cn.cursor() as cur:
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
             cur.execute(sql, (channel_id,))
-            cn.commit()
+            conn.commit()
             return cur.rowcount
+        finally:
+            cur.close()
+            conn.close()
