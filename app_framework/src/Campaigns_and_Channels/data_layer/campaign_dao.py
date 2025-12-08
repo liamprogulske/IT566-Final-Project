@@ -20,13 +20,38 @@ class CampaignDAO:
             cur.execute(base, tuple(args))
             return [row_to_dict(cur, r) for r in cur.fetchall()]
 
-    def create(self, name, start_date=None, end_date=None, budget_cents=0):
-        sql = """INSERT INTO campaign(name,start_date,end_date,budget_cents)
-                 VALUES(%s,%s,%s,%s)"""
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute(sql, (name, start_date, end_date, budget_cents))
-            cn.commit()
+#----------------------------------------------------------#
+#------------------------CREATE----------------------------#
+#----------------------------------------------------------#
+
+    def create(self, name, start_date=None, end_date=None, budget_cents=0, description=None):
+        """
+        Create a campaign.
+
+        'description' is accepted for compatibility with the service layer,
+        but is currently not stored in the database because the schema
+        does not define a description column.
+        """
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                """
+                INSERT INTO campaign (name, start_date, end_date, budget_cents)
+                VALUES (%s, %s, %s, %s)
+                """,
+                (name, start_date, end_date, budget_cents),
+            )
+            conn.commit()
             return cur.lastrowid
+        finally:
+            cur.close()
+            conn.close()
+
+#----------------------------------------------------------#
+#------------------------UPDATE----------------------------#
+#----------------------------------------------------------#
+
 
     def update(self, campaign_id, **fields):
         keys = list(fields.keys())
@@ -38,7 +63,42 @@ class CampaignDAO:
             cur.execute(sql, vals); cn.commit()
             return cur.rowcount
 
-    def delete(self, campaign_id):
-        with DB.conn() as cn, cn.cursor() as cur:
-            cur.execute("DELETE FROM campaign WHERE campaign_id=%s", (campaign_id,))
-            cn.commit(); return cur.rowcount
+#----------------------------------------------------------#
+#------------------------DELETE----------------------------#
+#----------------------------------------------------------#
+
+    def delete(self, campaign_id: int) -> int:
+        """
+        Delete a campaign by ID.
+        Because of ON DELETE CASCADE on campaign_channel_xref,
+        this will also remove its mappings.
+        Returns the number of rows deleted (0 or 1).
+        """
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM campaign WHERE campaign_id = %s", (campaign_id,))
+            conn.commit()
+            return cur.rowcount
+        finally:
+            cur.close()
+            conn.close()
+        
+
+def set_status(self, campaign_id: int, status: str) -> bool:
+    """
+    Update the status of a campaign.
+    Returns True if updated, False if no campaign was found.
+    """
+    conn = DB.get_connection()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "UPDATE campaign SET status = %s WHERE campaign_id = %s",
+            (status, campaign_id),
+        )
+        conn.commit()
+        return cur.rowcount > 0
+    finally:
+        cur.close()
+        conn.close()
