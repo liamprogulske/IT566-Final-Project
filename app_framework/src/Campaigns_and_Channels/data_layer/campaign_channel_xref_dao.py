@@ -200,3 +200,51 @@ class CampaignChannelXrefDAO:
             "start_date": start_date,
             "end_date": end_date,
         }
+
+    # ---------------------------------------------------------- #
+    # COUNTS & REPORTING HELPERS
+    # ---------------------------------------------------------- #
+    def count_campaigns_for_channel(self, channel_id: int) -> int:
+        """
+        Return how many campaigns are linked to a given channel.
+        Used for safe delete logic in the service layer.
+        """
+        sql = """
+            SELECT COUNT(*)
+            FROM campaign_channel_xref
+            WHERE channel_id = %s
+        """
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql, (channel_id,))
+            (count,) = cur.fetchone()
+            return int(count or 0)
+        finally:
+            cur.close()
+            conn.close()
+
+    def list_all_mappings(self) -> List[Dict]:
+        """
+        Return all campaign ↔ channel mappings with names, for reporting.
+        """
+        sql = """
+            SELECT
+                ccx.campaign_id,
+                c.name AS campaign_name,
+                ccx.channel_id,
+                ch.name AS channel_name
+            FROM campaign_channel_xref ccx
+            JOIN campaign c ON ccx.campaign_id = c.campaign_id
+            JOIN channel ch ON ccx.channel_id = ch.channel_id
+            ORDER BY ccx.campaign_id, ccx.channel_id
+        """
+        conn = DB.get_connection()
+        try:
+            cur = conn.cursor()
+            cur.execute(sql)
+            rows = cur.fetchall()
+            return [row_to_dict(cur, r) for r in rows]
+        finally:
+            cur.close()
+            conn.close()

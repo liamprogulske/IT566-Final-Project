@@ -19,7 +19,7 @@ class CampaignDAO:
         if q:
             base += " WHERE name LIKE %s"
             args.append(f"%{q}%")
-        base += " ORDER BY created_at DESC LIMIT %s OFFSET %s"
+        base += " ORDER BY campaign_id ASC LIMIT %s OFFSET %s"
         args += [limit, offset]
 
         conn = DB.get_connection()

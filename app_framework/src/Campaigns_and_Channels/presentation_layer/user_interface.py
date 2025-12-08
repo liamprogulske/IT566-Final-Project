@@ -137,7 +137,7 @@ class UserInterface:
     def help(self):
         print("""Commands:
         campaign:list                                         - list campaigns      
-        campaign:add <name> [start] [end] [budget_cents]      - create a campaign   
+        campaign:add <name> <start> <end> [budget_cents]      - create a campaign   
         campaign:delete <campaign_id> [--force]               - delete a campaign (safe delete)
         campaign:get <campaign_id>                            - show a campaign by id
         campaign:update <id> <name> [start] [end] [budget]    - update a campaign
@@ -148,7 +148,7 @@ class UserInterface:
         campaign:metrics:upsert <id> <date> <impr> <clicks> <spend_cents> [revenue_cents]
                                                               - upsert daily metrics row
               
-        channel:list                                          - list channels (formatted)
+        channel:list                                          - list channels
         channel:add <name> [type]                             - create a channel
         channel:delete <channel_id> [--force]                 - delete a channel
         channel:update <id> <name> <type>                     - update a channel
@@ -172,19 +172,31 @@ class UserInterface:
         self.campaign_list()
 
     def cmd_campaign_add(self, args):
-        # campaign:add "Holiday 2025" 2025-11-15 2025-12-31 5000000
-        if len(args) < 2:
-            self.print_error("Usage: campaign:add <name> [start] [end] [budget_cents]")
+        # campaign:add <name> <start_date> <end_date> [budget_cents]
+        if len(args) < 4:
+            self.print_error(
+                "Usage: campaign:add <name> <start_date> <end_date> [budget_cents]"
+            )
             return
 
         name = args[1]
-        sd = args[2] if len(args) > 2 else None
-        ed = args[3] if len(args) > 3 else None
-        budget = int(args[4]) if len(args) > 4 else 0
+        sd = args[2]
+        ed = args[3]
 
-        # dates as strings are acceptable if your DAO expects strings;
-        # if you want real date objects, convert here with date.fromisoformat.
-        cid = self.svc.create_campaign(name, sd, ed, budget)
+        try:
+            budget = int(args[4]) if len(args) > 4 else 0
+        except ValueError:
+            self.print_error("budget_cents must be an integer")
+            return
+
+        # If you want to enforce proper date format, you can convert to date here.
+        # For now, we let MySQL parse YYYY-MM-DD strings and rely on service validation.
+        try:
+            cid = self.svc.create_campaign(name, sd, ed, budget)
+        except ValueError as e:
+            self.print_error(str(e))
+            return
+
         self.print_success(f"created campaign_id={cid}")
 
     def cmd_campaign_delete(self, args):
@@ -258,6 +270,12 @@ class UserInterface:
             self.print_error("campaign_id must be an integer")
             return
 
+        campaign = self.svc.get_campaign(cid)
+        if not campaign:
+            self.print_info(f"no campaign found with id={cid}")
+            return
+        camp_name = campaign.get("name", "")
+
         try:
             channels = self.svc.list_channels_for_campaign(cid)
         except ValueError as e:
@@ -265,10 +283,10 @@ class UserInterface:
             return
 
         if not channels:
-            self.print_info(f"No channels linked to campaign_id={cid}")
+            self.print_info(f"No channels linked to campaign '{camp_name}' (id={cid})")
             return
 
-        print(f"\n------- CHANNELS FOR CAMPAIGN {cid} -------\n")
+        print(f"\n------- CHANNELS FOR CAMPAIGN {cid}: {camp_name} -------\n")
         print("+-----+----------------------------+-----------+-----------------------+")
         print("| ID  | NAME                       | TYPE      | CREATED_AT            |")
         print("+-----+----------------------------+-----------+-----------------------+")
@@ -404,6 +422,9 @@ class UserInterface:
 
     def _print_performance_summary(self, perf: dict):
         cid = perf["campaign_id"]
+        campaign = self.svc.get_campaign(cid)
+        camp_name = campaign.get("name") if campaign else ""
+
         start = perf.get("start_date")
         end = perf.get("end_date")
         impressions = perf["impressions"]
@@ -419,16 +440,20 @@ class UserInterface:
 
         date_range = f"{start} → {end}" if (start or end) else "All Time"
 
-        print(f"\n------- PERFORMANCE FOR CAMPAIGN {cid} -------\n")
-        print(f"Date Range   : {date_range}")
-        print(f"Impressions  : {impressions}")
-        print(f"Clicks       : {clicks}")
-        print(f"Spend        : {spend_usd:.2f} USD")
-        print(f"Revenue      : {revenue_usd:.2f} USD")
+        title = f"PERFORMANCE FOR CAMPAIGN {cid}"
+        if camp_name:
+            title += f": {camp_name}"
+
+        print(f"\n------- {title} -------\n")
+        print(f"Date Range              : {date_range}")
+        print(f"Impressions             : {impressions}")
+        print(f"Clicks                  : {clicks}")
+        print(f"Spend                   : {spend_usd:.2f} USD")
+        print(f"Revenue                 : {revenue_usd:.2f} USD")
         print()
-        print(f"CTR          : {ctr * 100:.2f}%")
-        print(f"CPC          : {cpc:.4f} USD/click")
-        print(f"ROAS         : {roas:.4f} (revenue / spend)")
+        print(f"Click-Through Rate      : {ctr * 100:.2f}%")
+        print(f"Cost Per Click          : {cpc:.4f} USD / click")
+        print(f"Return on Ad Spend      : {roas:.4f} (revenue / spend)")
         print("\n---------------------------------------------\n")
 
 
@@ -516,32 +541,34 @@ class UserInterface:
     # (these are mostly unchanged, just used by the cmd_* wrappers)
     # ---------------------------------------------------------- #
     def campaign_list(self):
-        """Pretty-print campaigns with aligned columns and | separators."""
-        conn = DB.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT campaign_id, name, status, budget_cents, created_at "
-                "FROM campaign ORDER BY campaign_id"
+        """Pretty-print campaigns using the service layer."""
+        campaigns = self.svc.list_campaigns(limit=1000, offset=0)
+
+        print("\n--------------- CAMPAIGNS ---------------\n")
+        print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
+        print("| ID  | NAME                       | STATUS    | BUDGET_CENTS  | BUDGET_USD   | CREATED_AT             |")
+        print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
+
+        for c in campaigns:
+            cid = c.get("campaign_id")
+            name = c.get("name", "")
+            status = c.get("status", "")
+            budget_cents = c.get("budget_cents") or 0
+            created_at = c.get("created_at")
+
+            budget_usd = budget_cents / 100.0
+
+            print(
+                f"|{cid:>4} | "
+                f"{name:<26.27} | "
+                f"{status:<9} | "
+                f"{budget_cents:>13} | "
+                f"{budget_usd:>12.2f} | "
+                f"{created_at}    |"
             )
-            print("\n--------------- CAMPAIGNS ---------------\n")
-            print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
-            print("| ID  | NAME                       | STATUS    | BUDGET_CENTS  | BUDGET_USD   | CREATED_AT             |")
-            print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
-            for cid, name, status, budget_cents, created_at in cur:
-                budget_usd = (budget_cents or 0) / 100.0
-                print(
-                    f"|{cid:>4} | "
-                    f"{name:<26.27} | "
-                    f"{status:<9} | "
-                    f"{budget_cents:>13} | "
-                    f"{budget_usd:>12.2f} | "
-                    f"{created_at}    |"
-                )
-            print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
-        finally:
-            cur.close()
-            conn.close()
+
+        print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
+
 
     def campaign_get(self, c_id: int):
         """Fetch and pretty-print a single campaign by id using DAO."""
@@ -550,43 +577,44 @@ class UserInterface:
             self.print_info(f"no campaign found with id={c_id}")
             return
 
+        budget_cents = campaign.get("budget_cents") or 0
+        budget_usd = budget_cents / 100.0
+
         print("\n------------ CAMPAIGN DETAIL ------------\n")
         print(f"ID:       {campaign.get('campaign_id')}")
         print(f"Name:     {campaign.get('name')}")
         print(f"Status:   {campaign.get('status')}")
         print(f"Start:    {campaign.get('start_date')}")
         print(f"End:      {campaign.get('end_date')}")
-        print(f"Budget:   {campaign.get('budget_cents')} cents")
+        print(f"Budget:   {budget_usd:.2f} USD ({budget_cents} cents)")
         print(f"Created:  {campaign.get('created_at')}")
         print("\n----------------------------------------\n")
 
     def channel_list(self):
-        """Pretty-print channels with aligned columns and | separators."""
-        conn = DB.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT channel_id, name, type, created_at "
-                "FROM channel ORDER BY channel_id"
+        """Pretty-print channels using the service layer."""
+        channels = self.svc.list_channels(limit=1000, offset=0)
+
+        print("\n--------------- CHANNELS ---------------\n")
+        print("+-----+----------------------------+-----------+-----------------------+")
+        print("| ID  | NAME                       | TYPE      | CREATED_AT            |")
+        print("+-----+----------------------------+-----------+-----------------------+")
+
+        for ch in channels:
+            channel_id = ch.get("channel_id")
+            name = ch.get("name", "")
+            ch_type = ch.get("type", "")
+            created_at = ch.get("created_at")
+
+            print(
+                f"|{channel_id:>4} | "
+                f"{name:<26.27} | "
+                f"{ch_type:<9} | "
+                f"{created_at}   | "
             )
 
-            print("\n--------------- CHANNELS ---------------\n")
-            print("+-----+----------------------------+-----------+-----------------------+")
-            print("| ID  | NAME                       | TYPE      | CREATED_AT            |")
-            print("+-----+----------------------------+-----------+-----------------------+")
+        print("+-----+----------------------------+-----------+-----------------------+")
+        print()
 
-            for channel_id, name, ch_type, created_at in cur:
-                print(
-                    f"|{channel_id:>4} | "
-                    f"{name:<26.27} | "
-                    f"{ch_type:<9} | "
-                    f"{created_at}   | "
-                )
-            print("+-----+----------------------------+-----------+-----------------------+")
-            print()
-        finally:
-            cur.close()
-            conn.close()
 
     def channel_delete(self, channel_id: int, force: bool = False):
         """
@@ -594,30 +622,18 @@ class UserInterface:
         - If the channel is linked to any campaign and not forced, warn and abort.
         - If --force is used, delete the channel (FK CASCADE removes mappings).
         """
-        conn = DB.get_connection()
-        try:
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT COUNT(*) FROM campaign_channel_xref WHERE channel_id = %s",
-                (channel_id,),
-            )
-            (count,) = cur.fetchone()
-        finally:
-            cur.close()
-            conn.close()
+        deleted, linked_count = self.svc.delete_channel_safe(channel_id, force=force)
 
-        if count > 0 and not force:
+        if not deleted and linked_count > 0 and not force:
             self.print_error(
-                f"Channel {channel_id} is linked to {count} campaign(s). "
+                f"Channel {channel_id} is linked to {linked_count} campaign(s). "
                 "Use 'channel:delete <id> --force' to delete and remove mappings."
             )
-            return
-
-        deleted = self.channels.delete(channel_id)
-        if deleted:
+        elif deleted:
             self.print_success(f"deleted channel_id={channel_id}")
         else:
             self.print_info(f"no channel found with id={channel_id}")
+
 
     def unlink(self, campaign_id: int, channel_id: int):
         """Remove a single campaign ↔ channel mapping."""
@@ -641,72 +657,69 @@ class UserInterface:
             conn.close()
 
     def inspect_db(self):
-        """Pretty-print the main tables with aligned columns and | separators."""
-        conn = DB.get_connection()
-        try:
-            cur = conn.cursor()
+        """Pretty-print the main tables using a snapshot from the service layer."""
+        snapshot = self.svc.inspect_database()
+        channels = snapshot["channels"]
+        campaigns = snapshot["campaigns"]
+        mappings = snapshot["mappings"]
 
-            # CHANNELS
-            cur.execute(
-                "SELECT channel_id, name, type, created_at "
-                "FROM channel ORDER BY channel_id"
+        # CHANNELS
+        print("\n--------------- CHANNELS ---------------\n")
+        print("------+----------------------------+-----------+------------------------")
+        print("| ID  | NAME                       | TYPE      | CREATED_AT            |")
+        print("------+----------------------------+-----------+------------------------")
+        for ch in channels:
+            channel_id = ch.get("channel_id")
+            name = ch.get("name", "")
+            ch_type = ch.get("type", "")
+            created_at = ch.get("created_at")
+            print(
+                f"|{channel_id:>4} | "
+                f"{name:<26.27} | "
+                f"{ch_type:<9} | "
+                f"{created_at}   | "
             )
-            print("\n--------------- CHANNELS ---------------\n")
-            print("------+----------------------------+-----------+------------------------")
-            print("| ID  | NAME                       | TYPE      | CREATED_AT            |")
-            print("------+----------------------------+-----------+------------------------")
-            for channel_id, name, ch_type, created_at in cur:
-                print(
-                    f"|{channel_id:>4} | "
-                    f"{name:<26.27} | "
-                    f"{ch_type:<9} | "
-                    f"{created_at}   | "
-                )
-            print("------+----------------------------+-----------+------------------------")
-            print()
+        print("------+----------------------------+-----------+------------------------")
+        print()
 
-            # CAMPAIGNS
-            cur.execute(
-                "SELECT campaign_id, name, status, budget_cents, created_at "
-                "FROM campaign ORDER BY campaign_id"
-            )
-            print("\n--------------- CAMPAIGNS ---------------\n")
-            print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
-            print("| ID  | NAME                       | STATUS    | BUDGET_CENTS  | BUDGET_USD   | CREATED_AT             |")
-            print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
-            for cid, name, status, budget_cents, created_at in cur:
-                budget_usd = (budget_cents or 0) / 100.0
-                print(
-                    f"|{cid:>4} | "
-                    f"{name:<26.27} | "
-                    f"{status:<9} | "
-                    f"{budget_cents:>13} | "
-                    f"{budget_usd:>12.2f} | "
-                    f"{created_at}    |"
-                )
-            print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
+        # CAMPAIGNS
+        print("\n--------------- CAMPAIGNS ---------------\n")
+        print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
+        print("| ID  | NAME                       | STATUS    | BUDGET_CENTS  | BUDGET_USD   | CREATED_AT             |")
+        print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
+        for c in campaigns:
+            cid = c.get("campaign_id")
+            name = c.get("name", "")
+            status = c.get("status", "")
+            budget_cents = c.get("budget_cents") or 0
+            created_at = c.get("created_at")
+            budget_usd = budget_cents / 100.0
 
-            # MAPPINGS
-            print("\n--------- CAMPAIGN TO CHANNEL MAPPINGS ---------\n")
-            print("+-------------+----------------------------+------------+----------------------------+")
-            print("| CAMPAIGN_ID | CAMPAIGN                   | CHANNEL_ID | CHANNEL                    |")
-            print("+-------------+----------------------------+------------+----------------------------+")
-            cur.execute(
-                "SELECT ccx.campaign_id, c.name, ccx.channel_id, ch.name "
-                "FROM campaign_channel_xref ccx "
-                "JOIN campaign c ON ccx.campaign_id = c.campaign_id "
-                "JOIN channel ch ON ccx.channel_id = ch.channel_id "
-                "ORDER BY ccx.campaign_id, ccx.channel_id"
+            print(
+                f"|{cid:>4} | "
+                f"{name:<26.27} | "
+                f"{status:<9} | "
+                f"{budget_cents:>13} | "
+                f"{budget_usd:>12.2f} | "
+                f"{created_at}    |"
             )
-            for cmp_id, campaign_name, ch_id, channel_name in cur:
-                print(
-                    f"|{cmp_id:>11}  | "
-                    f"{campaign_name:<26.27} | "
-                    f"{ch_id:<10} | "
-                    f"{channel_name:<26.27} |"
-                )
-            print("+-------------+----------------------------+------------+----------------------------+")
-            print("\n---------------- END OF REPORT ----------------\n")
-        finally:
-            cur.close()
-            conn.close()
+        print("+-----+----------------------------+-----------+---------------+--------------+------------------------+")
+
+        # MAPPINGS
+        print("\n--------- CAMPAIGN TO CHANNEL MAPPINGS ---------\n")
+        print("+-------------+----------------------------+------------+----------------------------+")
+        print("| CAMPAIGN_ID | CAMPAIGN                   | CHANNEL_ID | CHANNEL                    |")
+        print("+-------------+----------------------------+------------+----------------------------+")
+        for m in mappings:
+            cmp_id = m.get("campaign_id")
+            campaign_name = m.get("campaign_name", "")
+            ch_id = m.get("channel_id")
+            channel_name = m.get("channel_name", "")
+            print(
+                f"|{cmp_id:>11}  | "
+                f"{campaign_name:<26.27} | "
+                f"{ch_id:<10} | "
+                f"{channel_name:<26.27} |"
+            )
+        print("+-------------+----------------------------+------------+----------------------------+")
+        print("\n---------------- END OF REPORT ----------------\n")

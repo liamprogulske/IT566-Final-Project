@@ -58,7 +58,7 @@ ORDER BY campaign_id;
 
 
 -- ==================================================
--- 📌 CAMPAIGN ↔ CHANNEL MAPPINGS  (WITH PIPES)
+-- CAMPAIGN ↔ CHANNEL MAPPINGS
 -- ==================================================
 SELECT '---- CAMPAIGN TO CHANNEL MAPPINGS ----' AS '';
 

@@ -7,7 +7,7 @@
         "database": "it566_project_db",
         "user": "root",
         "host": "localhost",
-        "port": 3306,
+        "port": 8889,
         "password": "root"
       }
     }

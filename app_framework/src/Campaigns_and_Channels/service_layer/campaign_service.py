@@ -124,6 +124,21 @@ class CampaignService:
         rows = self.campaigns.delete(campaign_id)
         return rows > 0, linked_count
 
+
+    def delete_channel_safe(self, channel_id: int, force: bool = False) -> tuple[bool, int]:
+        """
+        Safe delete for channels:
+          - If channel is linked to any campaigns and not force, do NOT delete.
+          - If force is True, delete the channel (FK CASCADE cleans xrefs).
+        Returns (deleted, linked_count).
+        """
+        linked_count = self.xref.count_campaigns_for_channel(channel_id)
+        if linked_count > 0 and not force:
+            return False, linked_count
+
+        rows = self.channels.delete(channel_id)
+        return rows > 0, linked_count
+
     # ------------------------------------------------------------------ #
     # Campaign status
     # ------------------------------------------------------------------ #
@@ -268,3 +283,20 @@ class CampaignService:
         for cid in campaign_ids:
             out[cid] = self.xref.list_channels_for_campaign(cid)
         return out
+
+    def inspect_database(self) -> dict:
+        """
+        Return a structured snapshot of the main tables for reporting:
+          - campaigns
+          - channels
+          - mappings (campaign ↔ channel)
+        UI is responsible for pretty-printing only.
+        """
+        campaigns = self.campaigns.list(limit=1000, offset=0)
+        channels = self.channels.list(limit=1000, offset=0)
+        mappings = self.xref.list_all_mappings()
+        return {
+            "campaigns": campaigns,
+            "channels": channels,
+            "mappings": mappings,
+        }
